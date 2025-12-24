@@ -1,0 +1,9 @@
+Start The ENV 
+
+npm run dev
+
+
+winget install --id Cloudflare.cloudflared
+
+
+cloudflared tunnel --url http://localhost:3000

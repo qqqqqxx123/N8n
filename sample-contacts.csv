@@ -1,0 +1,7 @@
+full_name,phone,source,tags,opt_in_status,last_purchase_at,total_spend,interest_type,DOB
+John Doe,91234567,csv_import,vip,TRUE,18/1/2025,15000,engagement,2/1/2000
+Jane Smith,65498521,website,regular,TRUE,18/8/2024,5000,wedding,5/3/1985
+Bob Johnson,25121213,store,regular,FALSE,15/12/2022,2500,fashion,30/9/2006
+Alice Williams,98204502,csv_import,vip,TRUE,1/12/2025,20000,engagement,9/5/1998
+Charlie Brown,45157981,website,new,TRUE,,0,wedding,28/11/1979
+Allen,67775293,website,vip,TRUE,19/12/2025,1000000,fashion,18/3/1999

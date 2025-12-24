@@ -19,53 +19,47 @@ export async function POST(request: NextRequest) {
     const supabase = createClient();
 
     // Normalize phone number (using Hong Kong country code 852 as default)
-    const normalizedPhone = normalizePhoneToE164(message.from) || normalizePhoneToE164(message.from, '852');
+    const normalizedPhone =
+      normalizePhoneToE164(message.from) || normalizePhoneToE164(message.from, '852');
+
     if (!normalizedPhone) {
-      return NextResponse.json(
-        { error: 'Invalid phone number format' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid phone number format' }, { status: 400 });
     }
 
-    // Find contact by phone
+    // Find contact by phone (IMPORTANT: select opt_in_status too for TS + logic)
     const { data: contact, error: contactError } = await supabase
       .from('contacts')
-      .select('id')
+      .select('id,opt_in_status')
       .eq('phone_e164', normalizedPhone)
       .single();
 
+    // Contact doesn't exist -> create a new one
     if (contactError || !contact) {
-      // Contact doesn't exist, create a new one
       const { data: newContact, error: createError } = await supabase
         .from('contacts')
         .insert({
           phone_e164: normalizedPhone,
           source: 'whatsapp_inbound',
-          opt_in_status: true, // Inbound message implies opt-in
+          opt_in_status: true, // inbound implies opt-in
           opt_in_timestamp: new Date().toISOString(),
           opt_in_source: 'whatsapp_inbound',
         })
-        .select()
+        .select('id')
         .single();
 
       if (createError || !newContact) {
-        return NextResponse.json(
-          { error: 'Failed to create contact' },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: 'Failed to create contact' }, { status: 500 });
       }
 
-      // Create message record
       await supabase.from('messages').insert({
         contact_id: newContact.id,
         direction: 'in',
         status: 'delivered',
-        provider_message_id: message.message_id || null,
-        body: message.body || null,
+        provider_message_id: message.message_id ?? null,
+        body: message.body ?? null,
         is_read: false,
       });
 
-      // Create event
       await supabase.from('events').insert({
         contact_id: newContact.id,
         type: 'whatsapp_inbound',
@@ -83,7 +77,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Contact exists - update last inbound timestamp in events
+    // Contact exists -> get last inbound timestamp
     const { data: lastInbound } = await supabase
       .from('messages')
       .select('created_at')
@@ -93,17 +87,17 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .single();
 
-    // Create message record
+    // Log message
     await supabase.from('messages').insert({
       contact_id: contact.id,
       direction: 'in',
       status: 'delivered',
-      provider_message_id: message.message_id || null,
-      body: message.body || null,
+      provider_message_id: message.message_id ?? null,
+      body: message.body ?? null,
       is_read: false,
     });
 
-    // Create event with last_inbound_whatsapp_at
+    // Log event
     await supabase.from('events').insert({
       contact_id: contact.id,
       type: 'whatsapp_inbound',
@@ -115,7 +109,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update opt-in status if not already opted in (inbound message implies consent)
+    // Update opt-in status if not already opted in
     if (!contact.opt_in_status) {
       await supabase
         .from('contacts')
@@ -134,17 +128,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('WhatsApp webhook error:', error);
+
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: 'Invalid webhook payload', details: error.errors },
         { status: 400 }
       );
     }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to process webhook' },
       { status: 500 }
     );
   }
 }
-
-

@@ -74,14 +74,19 @@ export async function GET(request: NextRequest) {
     let nextUrl: string | undefined = `https://graph.facebook.com/v18.0/${wabaId}/message_templates`;
 
     // Paginate through all templates
-    while (nextUrl) {
-      try {
-        const response = await axios.get<MetaTemplatesResponse>(nextUrl, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          timeout: 30000,
-        });
+    
+    import type { AxiosResponse } from "axios";
+
+while (nextUrl) {
+  try {
+    const response: AxiosResponse<MetaTemplatesResponse> =
+      await axios.get(nextUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        timeout: 30000,
+      });
+
 
         if (response.data.data) {
           allTemplates = allTemplates.concat(response.data.data);

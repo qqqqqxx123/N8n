@@ -7,3 +7,11 @@ winget install --id Cloudflare.cloudflared
 
 
 cloudflared tunnel --url http://localhost:3000
+
+
+
+
+git status
+git add .
+git commit -m "Fix axios response typing and build errors"
+git push origin main

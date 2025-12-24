@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import axios from 'axios';
+import type { AxiosResponse } from "axios";
 
 interface MetaTemplate {
   name: string;
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
 
     // Paginate through all templates
     
-    import type { AxiosResponse } from "axios";
+  
 
 while (nextUrl) {
   try {

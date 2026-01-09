@@ -94,11 +94,11 @@ rm -rf n8n
 
 git clone https://github.com/qqqqqxx123/n8n.git
 
-docker build --no-cache -t ring-crm .
 
 docker stop ring-crm || true
 docker rm ring-crm || true
 
+docker build --no-cache -t ring-crm .
 
 
 docker run -d --name ring-crm \

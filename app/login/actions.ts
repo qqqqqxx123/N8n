@@ -7,63 +7,75 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 export async function loginAction(formData: FormData) {
-  const username = formData.get('username') as string;
-  const password = formData.get('password') as string;
+  try {
+    const username = formData.get('username') as string;
+    const password = formData.get('password') as string;
 
-  if (!username || !password) {
-    redirect('/login?error=' + encodeURIComponent('Username and password are required'));
-  }
+    if (!username || !password) {
+      redirect('/login?error=' + encodeURIComponent('Username and password are required'));
+      return;
+    }
 
-  const supabase = createClient();
+    const supabase = createClient();
 
-  // Find user by username in custom users table
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id, username, password_hash, full_name, email')
-    .eq('username', username)
-    .single();
+    // Find user by username in custom users table
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, username, password_hash, full_name, email')
+      .eq('username', username)
+      .single();
 
-  if (userError || !user) {
-    redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
-  }
+    if (userError || !user) {
+      console.error('User lookup error:', userError);
+      redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
+      return;
+    }
 
-  // Verify password using bcrypt
-  const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    // Verify password using bcrypt
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
-  if (!isValidPassword) {
-    redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
-  }
+    if (!isValidPassword) {
+      console.error('Password verification failed for user:', username);
+      redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
+      return;
+    }
 
-  // Generate session token
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 30); // 30 days session
+    // Generate session token
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // 30 days session
 
-  // Create session in database
-  const { error: sessionError } = await supabase
-    .from('sessions')
-    .insert({
-      user_id: user.id,
-      session_token: sessionToken,
-      expires_at: expiresAt.toISOString(),
+    // Create session in database
+    const { error: sessionError } = await supabase
+      .from('sessions')
+      .insert({
+        user_id: user.id,
+        session_token: sessionToken,
+        expires_at: expiresAt.toISOString(),
+      });
+
+    if (sessionError) {
+      console.error('Error creating session:', sessionError);
+      redirect('/login?error=' + encodeURIComponent('Failed to create session: ' + sessionError.message));
+      return;
+    }
+
+    // Set cookie with session token using Supabase SSR cookie handling
+    const cookieStore = cookies();
+    cookieStore.set('session_token', sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: '/',
     });
 
-  if (sessionError) {
-    console.error('Error creating session:', sessionError);
-    redirect('/login?error=' + encodeURIComponent('Failed to create session'));
+    // Redirect to home page on success
+    redirect('/');
+  } catch (error) {
+    console.error('Login action error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    redirect('/login?error=' + encodeURIComponent('Login failed: ' + errorMessage));
   }
-
-  // Set cookie with session token using Supabase SSR cookie handling
-  const cookieStore = cookies();
-  cookieStore.set('session_token', sessionToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-    path: '/',
-  });
-
-  // Redirect to home page on success
-  redirect('/');
 }
 

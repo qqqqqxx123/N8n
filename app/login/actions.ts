@@ -1,7 +1,10 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 export async function loginAction(formData: FormData) {
   const username = formData.get('username') as string;
@@ -13,20 +16,52 @@ export async function loginAction(formData: FormData) {
 
   const supabase = createClient();
 
-  // Treat username field as email
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: username,
-    password: password,
+  // Find user by username in custom users table
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id, username, password_hash, full_name, email')
+    .eq('username', username)
+    .single();
+
+  if (userError || !user) {
+    redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
+  }
+
+  // Verify password using bcrypt
+  const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+  if (!isValidPassword) {
+    redirect('/login?error=' + encodeURIComponent('Invalid username or password'));
+  }
+
+  // Generate session token
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30); // 30 days session
+
+  // Create session in database
+  const { error: sessionError } = await supabase
+    .from('sessions')
+    .insert({
+      user_id: user.id,
+      session_token: sessionToken,
+      expires_at: expiresAt.toISOString(),
+    });
+
+  if (sessionError) {
+    console.error('Error creating session:', sessionError);
+    redirect('/login?error=' + encodeURIComponent('Failed to create session'));
+  }
+
+  // Set cookie with session token using Supabase SSR cookie handling
+  const cookieStore = cookies();
+  cookieStore.set('session_token', sessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 30, // 30 days
+    path: '/',
   });
-
-  if (error) {
-    // Redirect back with error message
-    redirect('/login?error=' + encodeURIComponent(error.message || 'Invalid email or password'));
-  }
-
-  if (!data.user || !data.session) {
-    redirect('/login?error=' + encodeURIComponent('Login failed. Please try again.'));
-  }
 
   // Redirect to home page on success
   redirect('/');

@@ -23,13 +23,10 @@ export function middleware(request: NextRequest) {
   }
 
   // --- your auth logic below ---
-  // Example: check session cookie (replace with your real check)
-  const hasSession =
-    request.cookies.get("sb-access-token")?.value ||
-    request.cookies.get("sb:token")?.value ||
-    request.cookies.get("supabase-auth-token")?.value;
+  // Check for session_token cookie (set by login action)
+  const sessionToken = request.cookies.get("session_token")?.value;
 
-  if (!hasSession) {
+  if (!sessionToken) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

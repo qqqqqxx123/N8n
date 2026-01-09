@@ -98,6 +98,8 @@ git clone https://github.com/qqqqqxx123/n8n.git
 docker stop ring-crm || true
 docker rm ring-crm || true
 
+mkdir -p public
+
 docker build --no-cache -t ring-crm .
 
 

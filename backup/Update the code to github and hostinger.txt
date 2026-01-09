@@ -88,6 +88,9 @@ docker logs -f wa-bridge
 
 
 
+docker build --no-cache -t crm .
+
+
 
 
 

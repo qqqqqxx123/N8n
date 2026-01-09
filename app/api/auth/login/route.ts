@@ -64,10 +64,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Set cookie with session token
+    // Only use secure cookies if actually using HTTPS (not just production mode)
     const cookieStore = cookies();
+    const useSecureCookies = process.env.USE_SECURE_COOKIES === 'true' || 
+      (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://'));
+    
     cookieStore.set('session_token', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: useSecureCookies,
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: '/',

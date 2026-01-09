@@ -19,3 +19,4 @@ COMMENT ON COLUMN whatsapp_templates.button2_type IS 'Second button type: URL or
 COMMENT ON COLUMN whatsapp_templates.button2_url IS 'Second button URL (if type is URL)';
 COMMENT ON COLUMN whatsapp_templates.button2_phone IS 'Second button phone number (if type is PHONE_NUMBER)';
 
+

@@ -1,31 +1,38 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const sessionToken = request.cookies.get('session_token')?.value;
 
-  // Allow access to login page and API auth routes (including create-user for initial setup)
-  if (pathname === '/login' || pathname.startsWith('/api/auth/')) {
-    // If already logged in, redirect from login page to home
-    if (pathname === '/login' && sessionToken) {
-      return NextResponse.redirect(new URL('/', request.url));
-    }
+  // ✅ Allow Next internals + public files + auth pages
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
+    pathname === "/login" ||
+    pathname === "/favicon.ico" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml"
+  ) {
     return NextResponse.next();
   }
 
-  // Allow webhook endpoints (they use API keys, not sessions)
-  if (pathname.startsWith('/api/whatsapp/webhook') || 
-      pathname.startsWith('/api/whatsapp/outbound') ||
-      pathname.startsWith('/api/webhooks/') ||
-      pathname.startsWith('/api/n8n/')) {
+  // ✅ If you serve files from /public (e.g. /test.txt, /images/...)
+  // allow common static extensions:
+  if (/\.(.*)$/.test(pathname)) {
     return NextResponse.next();
   }
 
-  // Protect all other routes - require authentication
-  if (!sessionToken) {
+  // --- your auth logic below ---
+  // Example: check session cookie (replace with your real check)
+  const hasSession =
+    request.cookies.get("sb-access-token")?.value ||
+    request.cookies.get("sb:token")?.value ||
+    request.cookies.get("supabase-auth-token")?.value;
+
+  if (!hasSession) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = "/login";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 
@@ -33,14 +40,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!_next/static|_next/image|favicon.ico).*)',
-  ],
+  matcher: ["/((?!_next/static|_next/image).*)"],
 };
-

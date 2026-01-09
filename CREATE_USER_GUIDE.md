@@ -91,3 +91,4 @@ curl -X POST http://localhost:3000/api/auth/create-user -H "Content-Type: applic
 - Check your `.env` file has correct Supabase credentials
 - Verify the migration `012_add_users_table.sql` has been executed
 
+

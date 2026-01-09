@@ -18,3 +18,4 @@ COMMENT ON TABLE message_events IS 'Audit log for WhatsApp message events from w
 
 
 
+

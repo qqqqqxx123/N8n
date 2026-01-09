@@ -19,3 +19,4 @@ COMMENT ON COLUMN whatsapp_templates.image6 IS 'Sixth image URL for template';
 COMMENT ON COLUMN whatsapp_templates.image7 IS 'Seventh image URL for template';
 COMMENT ON COLUMN whatsapp_templates.image8 IS 'Eighth image URL for template';
 
+

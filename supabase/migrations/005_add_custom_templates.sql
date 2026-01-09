@@ -25,3 +25,4 @@ WHERE is_custom = true;
 CREATE INDEX IF NOT EXISTS idx_whatsapp_templates_is_custom ON whatsapp_templates(is_custom);
 
 
+

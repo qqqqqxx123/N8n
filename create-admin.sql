@@ -21,3 +21,4 @@ VALUES (
 -- 2. Replace the password_hash value in the INSERT statement above
 -- 3. Run the SQL command in your Supabase SQL editor
 
+

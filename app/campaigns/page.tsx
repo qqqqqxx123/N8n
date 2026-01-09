@@ -7,6 +7,7 @@ import { Navbar } from '@/components/navbar';
 import { Contact } from '@/lib/types/database';
 
 interface MetaTemplate {
+  is_custom?: boolean;
   id: string;
   waba_id: string;
   name: string;

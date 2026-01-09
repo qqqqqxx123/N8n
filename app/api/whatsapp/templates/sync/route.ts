@@ -4,6 +4,7 @@ import axios from 'axios';
 import type { AxiosResponse } from "axios";
 
 interface MetaTemplate {
+  is_custom?: boolean;
   name: string;
   language: string;
   status: string;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { normalizePhoneToE164 } from '@/lib/utils/phone';
+import { normalizeDOB } from '@/lib/utils/dob';
 
 // Helper function to validate and parse dates
 function isValidDate(dateString: string): boolean {
@@ -10,27 +11,8 @@ function isValidDate(dateString: string): boolean {
   return date instanceof Date && !isNaN(date.getTime());
 }
 
-// Helper function to format DOB (accepts various date formats, returns YYYY-MM-DD or original string)
-function formatDOB(dobString: string): string | null {
-  if (!dobString || !dobString.trim()) return null;
-  
-  const trimmed = dobString.trim();
-  
-  // Try to parse as date
-  const date = new Date(trimmed);
-  if (isValidDate(trimmed)) {
-    // Return in YYYY-MM-DD format (standard date format)
-    return date.toISOString().split('T')[0];
-  }
-  
-  // If it's already in YYYY-MM-DD format, return as is
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
-  }
-  
-  // If we can't parse it, return the original string (varchar can store it)
-  return trimmed;
-}
+// Use the centralized DOB normalization function
+const formatDOB = normalizeDOB;
 
 // Helper function to safely parse and format timestamp dates (returns ISO string or null)
 function formatTimestamp(timestampString: string | undefined): string | null {

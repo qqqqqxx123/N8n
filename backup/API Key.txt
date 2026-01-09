@@ -1,0 +1,25 @@
+
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880
+
+
+Build Docker
+1. install docker
+2. 
+
+
+
+curl -X POST "https://sends-sentence-doubt-cache.trycloudflare.com/send" ^
+  -H "Content-Type: application/json" ^
+  -H "x-api-key: 62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880" ^
+  -d "{\"to\":\"+85267775293",\"text\":\"hello\"}"
+
+
+
+curl -X POST "https://whatsapp-judp.vercel.app/send" ^
+  -H "Content-Type: application/json" ^
+  -H "x-api-key: 62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880" ^
+  -d "{\"to\":\"85267775293@s.whatsapp.net",\"text\":\"hello\"}"
+
+curl -H "x-api-key: 62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880" https://sends-sentence-doubt-cache.trycloudflare.com/status

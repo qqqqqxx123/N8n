@@ -1,31 +1,10 @@
 import Link from "next/link";
+import { Navbar } from "@/components/navbar";
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20">
-            <div className="flex items-center space-x-8">
-              <h1 className="text-2xl font-semibold text-gray-900">Ring CRM</h1>
-              <div className="flex space-x-6">
-                <Link href="/upload" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Upload
-                </Link>
-                <Link href="/contacts" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Contacts
-                </Link>
-                <Link href="/campaigns" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Campaigns
-                </Link>
-                <Link href="/settings" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Settings
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
       <main className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-lg shadow p-8">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Ring CRM</h2>

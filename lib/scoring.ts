@@ -60,19 +60,49 @@ export function computeScore(c: ContactForScoring): ScoreResult {
     reasons.push("Other ring interest");
   }
 
-  // Spend tier
+  // Last purchase date (recency matters)
+  if (c.last_purchase_at) {
+    const lastPurchase = new Date(c.last_purchase_at);
+    if (!isNaN(lastPurchase.getTime())) {
+      const daysSincePurchase = (now.getTime() - lastPurchase.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (daysSincePurchase <= 30) {
+        score += 15;
+        reasons.push("Recent purchase (30d)");
+      } else if (daysSincePurchase <= 90) {
+        score += 10;
+        reasons.push("Recent purchase (90d)");
+      } else if (daysSincePurchase <= 180) {
+        score += 5;
+        reasons.push("Recent purchase (180d)");
+      }
+    }
+  }
+
+  // Spend tier (more granular tiers)
   const spend = typeof c.total_spend === 'number' 
     ? c.total_spend 
     : Number(c.total_spend) || 0;
-  if (!isNaN(spend) && spend >= 10000) {
-    score += 20;
-    reasons.push("High spend >= 10k");
-  } else if (spend >= 5000) {
-    score += 12;
-    reasons.push("Mid spend 5k-10k");
-  } else if (spend > 0) {
-    score += 6;
-    reasons.push("Low spend > 0");
+  if (!isNaN(spend)) {
+    if (spend >= 20000) {
+      score += 25;
+      reasons.push("Very high spend >= 20k");
+    } else if (spend >= 10000) {
+      score += 20;
+      reasons.push("High spend >= 10k");
+    } else if (spend >= 7500) {
+      score += 15;
+      reasons.push("Mid-high spend 7.5k-10k");
+    } else if (spend >= 5000) {
+      score += 12;
+      reasons.push("Mid spend 5k-7.5k");
+    } else if (spend >= 2500) {
+      score += 8;
+      reasons.push("Low-mid spend 2.5k-5k");
+    } else if (spend > 0) {
+      score += 6;
+      reasons.push("Low spend > 0");
+    }
   }
 
   // Source

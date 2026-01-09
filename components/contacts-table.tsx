@@ -2,19 +2,34 @@
 
 import Link from 'next/link';
 import { Contact } from '@/lib/types/database';
+import { formatDOBForDisplay } from '@/lib/utils/dob';
+
+interface ContactWithScore extends Contact {
+  score?: number | null;
+  segment?: string | null;
+}
+
+type SortField = 'name' | 'tags' | 'total_spend' | 'score' | null;
+type SortDirection = 'asc' | 'desc';
 
 interface ContactsTableProps {
-  contacts: Contact[];
+  contacts: ContactWithScore[];
   isLoading?: boolean;
   selectedContactIds?: Set<string>;
   onSelectionChange?: (selectedIds: Set<string>) => void;
+  sortField?: SortField;
+  sortDirection?: SortDirection;
+  onSort?: (field: SortField) => void;
 }
 
 export function ContactsTable({ 
   contacts, 
   isLoading = false,
   selectedContactIds = new Set(),
-  onSelectionChange
+  onSelectionChange,
+  sortField = null,
+  sortDirection = 'asc',
+  onSort
 }: ContactsTableProps) {
   function handleCheckboxChange(contactId: string, checked: boolean) {
     if (!onSelectionChange) return;
@@ -64,26 +79,63 @@ export function ContactsTable({
                 />
               </th>
             )}
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Name
+            <th 
+              className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              onClick={() => onSort?.('name')}
+            >
+              <div className="flex items-center gap-1">
+                Name
+                {sortField === 'name' && (
+                  <span className="text-gray-400">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </div>
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Phone
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Source
+            <th 
+              className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              onClick={() => onSort?.('tags')}
+            >
+              <div className="flex items-center gap-1">
+                Tags
+                {sortField === 'tags' && (
+                  <span className="text-gray-400">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </div>
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Tags
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Opt-In
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Total Spend
+            <th 
+              className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              onClick={() => onSort?.('total_spend')}
+            >
+              <div className="flex items-center gap-1">
+                Total Spend
+                {sortField === 'total_spend' && (
+                  <span className="text-gray-400">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </div>
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               DOB
+            </th>
+            <th 
+              className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              onClick={() => onSort?.('score')}
+            >
+              <div className="flex items-center gap-1">
+                Score
+                {sortField === 'score' && (
+                  <span className="text-gray-400">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </div>
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actions
@@ -109,37 +161,58 @@ export function ContactsTable({
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 {contact.phone_e164}
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {contact.source || 'N/A'}
-              </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="flex flex-wrap gap-1">
-                  {contact.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                  {contact.tags.map((tag) => {
+                    const tagLower = tag.toLowerCase();
+                    let tagClasses = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ';
+                    
+                    if (tagLower === 'vip') {
+                      tagClasses += 'bg-yellow-100 text-yellow-800';
+                    } else if (tagLower === 'regular') {
+                      tagClasses += 'bg-blue-100 text-blue-800';
+                    } else if (tagLower === 'new') {
+                      tagClasses += 'bg-red-100 text-red-800';
+                    } else {
+                      // Default blue for other tags
+                      tagClasses += 'bg-blue-100 text-blue-800';
+                    }
+                    
+                    return (
+                      <span key={tag} className={tagClasses}>
+                        {tag}
+                      </span>
+                    );
+                  })}
                 </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <span
-                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    contact.opt_in_status
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-red-100 text-red-800'
-                  }`}
-                >
-                  {contact.opt_in_status ? 'Yes' : 'No'}
-                </span>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 ${Number(contact.total_spend).toLocaleString()}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {contact.DOB ? (contact.DOB.includes('T') ? new Date(contact.DOB).toLocaleDateString() : contact.DOB) : 'N/A'}
+                {formatDOBForDisplay(contact.DOB)}
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                {contact.score !== null && contact.score !== undefined ? (
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{contact.score}</span>
+                    {contact.segment && (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          contact.segment === 'hot'
+                            ? 'bg-red-100 text-red-800'
+                            : contact.segment === 'warm'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
+                        {contact.segment.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                 <Link

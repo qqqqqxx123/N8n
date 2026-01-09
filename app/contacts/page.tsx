@@ -8,8 +8,16 @@ import { Contact } from '@/lib/types/database';
 import Link from 'next/link';
 import { format } from 'date-fns';
 
+type SortField = 'name' | 'tags' | 'total_spend' | 'score' | null;
+type SortDirection = 'asc' | 'desc';
+
+interface ContactWithScore extends Contact {
+  score?: number | null;
+  segment?: string | null;
+}
+
 export default function ContactsPage() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contacts, setContacts] = useState<ContactWithScore[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeSegment, setActiveSegment] = useState<'hot' | 'warm' | 'cold' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,6 +27,8 @@ export default function ContactsPage() {
   const [lastComputedAt, setLastComputedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   const fetchContacts = useCallback(async () => {
     setIsLoading(true);
@@ -107,6 +117,48 @@ export default function ContactsPage() {
     }
   }, [success, error]);
 
+  // Sort contacts
+  const sortedContacts = [...contacts].sort((a, b) => {
+    if (!sortField) return 0;
+
+    let comparison = 0;
+
+    switch (sortField) {
+      case 'name':
+        const nameA = (a.full_name || '').toLowerCase();
+        const nameB = (b.full_name || '').toLowerCase();
+        comparison = nameA.localeCompare(nameB);
+        break;
+      
+      case 'tags':
+        const tagsA = (a.tags || []).join(',').toLowerCase();
+        const tagsB = (b.tags || []).join(',').toLowerCase();
+        comparison = tagsA.localeCompare(tagsB);
+        break;
+      
+      case 'total_spend':
+        comparison = Number(a.total_spend || 0) - Number(b.total_spend || 0);
+        break;
+      
+      case 'score':
+        comparison = (a.score ?? 0) - (b.score ?? 0);
+        break;
+    }
+
+    return sortDirection === 'asc' ? comparison : -comparison;
+  });
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, start with ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -170,7 +222,13 @@ export default function ContactsPage() {
           </div>
 
           <div className="p-6">
-            <ContactsTable contacts={contacts} isLoading={isLoading} />
+            <ContactsTable 
+              contacts={sortedContacts} 
+              isLoading={isLoading}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
           </div>
         </div>
       </main>

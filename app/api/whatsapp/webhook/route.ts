@@ -6,25 +6,78 @@ import { normalizePhoneToE164 } from '@/lib/utils/phone';
 const InboundMessageSchema = z.object({
   from: z.string(), // Phone number
   body: z.string().optional(),
+  message: z.string().optional(), // Alternative field name for message body
   message_id: z.string().optional(),
   timestamp: z.string().optional(),
   type: z.string().optional(),
+  status: z.string().optional(),
+  success: z.boolean().optional(),
+  stored: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const message = InboundMessageSchema.parse(body);
+    
+    // Log incoming webhook for debugging
+    console.log('[INBOUND WEBHOOK] Received payload:', JSON.stringify(body, null, 2));
+    
+    // Handle array format - extract first element if it's an array
+    const rawMessage = Array.isArray(body) ? body[0] : body;
+    
+    // Parse and validate the message
+    let parsed;
+    try {
+      parsed = InboundMessageSchema.parse(rawMessage);
+    } catch (parseError) {
+      console.error('[INBOUND WEBHOOK] Validation error:', parseError);
+      // Try to extract basic fields even if validation fails
+      parsed = {
+        from: rawMessage.from || rawMessage.phone_e164 || rawMessage.phone || '',
+        body: rawMessage.body || rawMessage.message || rawMessage.text || '',
+        message_id: rawMessage.message_id || rawMessage.id || null,
+        timestamp: rawMessage.timestamp || new Date().toISOString(),
+        type: rawMessage.type || 'text',
+      };
+      console.warn('[INBOUND WEBHOOK] Using fallback parsing:', parsed);
+    }
+    
+    // Map 'message' field to 'body' if body is not present
+    const message = {
+      ...parsed,
+      body: parsed.body || parsed.message || null,
+    };
+
+    console.log('[INBOUND WEBHOOK] Processed message:', JSON.stringify(message, null, 2));
 
     const supabase = createClient();
 
-    // Normalize phone number (using Hong Kong country code 852 as default)
-    const normalizedPhone =
-      normalizePhoneToE164(message.from) || normalizePhoneToE164(message.from, '852');
+    // Normalize phone number - try multiple country codes
+    // First try without default (for numbers that already have country code)
+    // Then try with US (1) for 10-11 digit numbers
+    // Finally try with Hong Kong (852) as default
+    let normalizedPhone = normalizePhoneToE164(message.from);
+    
+    if (!normalizedPhone) {
+      // Try US country code for 10-11 digit numbers
+      if (message.from.replace(/\D/g, '').length === 10 || message.from.replace(/\D/g, '').length === 11) {
+        normalizedPhone = normalizePhoneToE164(message.from, '1');
+      }
+    }
+    
+    if (!normalizedPhone) {
+      // Try Hong Kong as default
+      normalizedPhone = normalizePhoneToE164(message.from, '852');
+    }
 
     if (!normalizedPhone) {
-      return NextResponse.json({ error: 'Invalid phone number format' }, { status: 400 });
+      console.error('[INBOUND WEBHOOK] Failed to normalize phone:', message.from);
+      // Still try to save the message with the original phone number
+      console.warn('[INBOUND WEBHOOK] Attempting to save with original phone format:', message.from);
+      normalizedPhone = message.from; // Use original format as fallback
     }
+
+    console.log('[INBOUND WEBHOOK] Normalized phone:', normalizedPhone);
 
     // Find contact by phone (IMPORTANT: select opt_in_status too for TS + logic)
     const { data: contact, error: contactError } = await supabase
@@ -47,18 +100,68 @@ export async function POST(request: NextRequest) {
         .select('id')
         .single();
 
+      // If contact creation fails, still try to store the message with phone_e164
+      // The trigger will auto-link it when contact is created later
       if (createError || !newContact) {
-        return NextResponse.json({ error: 'Failed to create contact' }, { status: 500 });
+        console.error('Failed to create contact, storing message with phone_e164 only:', createError);
+        
+        const { data: orphanedMessage, error: orphanError } = await supabase.from('messages').insert({
+          contact_id: null, // Will be linked later via trigger
+          phone_e164: normalizedPhone,
+          direction: 'in',
+          status: 'delivered',
+          provider_message_id: message.message_id ?? null,
+          body: message.body ?? null,
+          is_read: false,
+        }).select().single();
+
+        if (orphanError) {
+          console.error('Error inserting orphaned message:', orphanError);
+          return NextResponse.json({ error: 'Failed to create contact and store message' }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          contact_id: null,
+          message: 'Message stored (contact will be created and linked later)',
+          phone_e164: normalizedPhone,
+        });
       }
 
-      await supabase.from('messages').insert({
+      const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
         contact_id: newContact.id,
+        phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
         direction: 'in',
         status: 'delivered',
         provider_message_id: message.message_id ?? null,
         body: message.body ?? null,
         is_read: false,
-      });
+      }).select().single();
+
+      if (messageError) {
+        console.error('Error inserting message for new contact:', messageError);
+        // Try to save as orphaned message if contact insert fails
+        const { error: orphanError } = await supabase.from('messages').insert({
+          contact_id: null,
+          phone_e164: normalizedPhone,
+          direction: 'in',
+          status: 'delivered',
+          provider_message_id: message.message_id ?? null,
+          body: message.body ?? null,
+          is_read: false,
+        });
+        
+        if (orphanError) {
+          console.error('Error inserting orphaned message:', orphanError);
+          return NextResponse.json({ 
+            error: 'Failed to save message to database', 
+            details: messageError.message 
+          }, { status: 500 });
+        }
+        console.log('Message saved as orphaned (will be linked later)');
+      } else {
+        console.log('Message inserted successfully for new contact:', insertedMessage);
+      }
 
       await supabase.from('events').insert({
         contact_id: newContact.id,
@@ -69,6 +172,66 @@ export async function POST(request: NextRequest) {
           timestamp: message.timestamp || new Date().toISOString(),
         },
       });
+
+      // Forward message to inbound webhook URL if configured and connection is active
+      try {
+        // Check if WhatsApp connection is active
+        const { data: connection } = await supabase
+          .from('whatsapp_connections')
+          .select('phone_number, status')
+          .eq('status', 'connected')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (connection) {
+          // Get inbound webhook URL from settings
+          const { data: inboundWebhookSetting } = await supabase
+            .from('settings')
+            .select('value')
+            .eq('key', 'n8n_webhook_inbound_url')
+            .single();
+
+          const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
+
+          if (inboundWebhookUrl) {
+            // Forward message to inbound webhook
+            const webhookPayload = {
+              from: normalizedPhone,
+              to: connection.phone_number,
+              body: message.body,
+              message: message.body, // Alternative field name
+              message_id: message.message_id,
+              timestamp: message.timestamp || new Date().toISOString(),
+              type: message.type || 'text',
+              contact_id: newContact.id,
+              direction: 'in',
+            };
+
+            try {
+              const webhookResponse = await fetch(inboundWebhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(webhookPayload),
+              });
+
+              if (!webhookResponse.ok) {
+                console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
+              } else {
+                console.log('Message forwarded to inbound webhook successfully');
+              }
+            } catch (webhookError) {
+              console.error('Error forwarding message to inbound webhook:', webhookError);
+              // Don't fail the request if webhook forwarding fails
+            }
+          }
+        }
+      } catch (forwardError) {
+        console.error('Error checking connection or forwarding message:', forwardError);
+        // Don't fail the request if forwarding fails
+      }
 
       return NextResponse.json({
         success: true,
@@ -87,15 +250,41 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .single();
 
-    // Log message
-    await supabase.from('messages').insert({
+    // Log message - CRITICAL: This must succeed or return an error
+    const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
       contact_id: contact.id,
+      phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
       direction: 'in',
       status: 'delivered',
       provider_message_id: message.message_id ?? null,
       body: message.body ?? null,
       is_read: false,
-    });
+    }).select().single();
+
+    if (messageError) {
+      console.error('Error inserting message for existing contact:', messageError);
+      // Try to save as orphaned message if contact insert fails
+      const { error: orphanError } = await supabase.from('messages').insert({
+        contact_id: null,
+        phone_e164: normalizedPhone,
+        direction: 'in',
+        status: 'delivered',
+        provider_message_id: message.message_id ?? null,
+        body: message.body ?? null,
+        is_read: false,
+      });
+      
+      if (orphanError) {
+        console.error('Error inserting orphaned message:', orphanError);
+        return NextResponse.json({ 
+          error: 'Failed to save message to database', 
+          details: messageError.message 
+        }, { status: 500 });
+      }
+      console.log('Message saved as orphaned (will be linked later)');
+    } else {
+      console.log('Message inserted successfully for existing contact:', insertedMessage);
+    }
 
     // Log event
     await supabase.from('events').insert({
@@ -119,6 +308,66 @@ export async function POST(request: NextRequest) {
           opt_in_source: 'whatsapp_inbound',
         })
         .eq('id', contact.id);
+    }
+
+    // Forward message to inbound webhook URL if configured and connection is active
+    try {
+      // Check if WhatsApp connection is active
+      const { data: connection } = await supabase
+        .from('whatsapp_connections')
+        .select('phone_number, status')
+        .eq('status', 'connected')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (connection) {
+        // Get inbound webhook URL from settings
+        const { data: inboundWebhookSetting } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'n8n_webhook_inbound_url')
+          .single();
+
+        const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
+
+        if (inboundWebhookUrl) {
+          // Forward message to inbound webhook
+          const webhookPayload = {
+            from: normalizedPhone,
+            to: connection.phone_number,
+            body: message.body,
+            message: message.body, // Alternative field name
+            message_id: message.message_id,
+            timestamp: message.timestamp || new Date().toISOString(),
+            type: message.type || 'text',
+            contact_id: contact.id,
+            direction: 'in',
+          };
+
+          try {
+            const webhookResponse = await fetch(inboundWebhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(webhookPayload),
+            });
+
+            if (!webhookResponse.ok) {
+              console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
+            } else {
+              console.log('Message forwarded to inbound webhook successfully');
+            }
+          } catch (webhookError) {
+            console.error('Error forwarding message to inbound webhook:', webhookError);
+            // Don't fail the request if webhook forwarding fails
+          }
+        }
+      }
+    } catch (forwardError) {
+      console.error('Error checking connection or forwarding message:', forwardError);
+      // Don't fail the request if forwarding fails
     }
 
     return NextResponse.json({

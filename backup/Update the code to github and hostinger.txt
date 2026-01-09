@@ -1,0 +1,94 @@
+Push updated code to GitHub
+
+git add .
+git commit -m "update wa-bridge and CRM integration"
+git push origin main
+
+
+ssh newuser@72.62.163.6
+
+Passeord 081122
+
+
+rm -rf whatsapp
+git clone https://github.com/qqqqqxx123/whatsapp.git
+
+
+cd whatsapp/
+
+nano .env
+
+docker stop wa-bridge
+docker rm wa-bridge
+
+docker run -d \ls 
+  --name wa-bridge \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  --env-file .env \
+  wa-bridge
+
+
+docker ps
+
+docker logs -f wa-bridge
+
+
+
+
+================================================================
+SSH CURL test
+
+curl -X POST http://72.62.163.6:3001/send \
+  -H "Content-Type: application/json" \ 
+  -H "x-api-key: 62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880 \
+  -d '{
+    "to": "+85267775293",
+    "template": {
+      "type": "image",
+      "image": {
+        "url": "https://ndkksaxhnhfbacxwocsg.supabase.co/storage/v1/object/public/whatsapp-templates/whatsapp-templates/1767346554970-goj11.png"
+      },
+      "caption": "Hello image"
+    }
+  }
+
+
+
+# Test if the endpoint is reachable
+curl -v https://advsysuperuser001.app.n8n.cloud/webhook/whatsapp-inbound
+
+# Or if you need to test from inside the Docker container:
+docker exec -it wa-bridge sh -c "curl -v \$CRM_URL/api/settings"
+
+================================================================
+
+
+=====================================================================================
+Correct Build
+
+docker stop wa-bridge || true
+docker rm wa-bridge || true
+
+
+docker build --no-cache -t wa-bridge .
+
+cd ~/whatsapp
+
+
+docker run -d --name wa-bridge \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  --env-file .env \
+  wa-bridge
+
+
+
+docker logs -f wa-bridge
+
+
+
+
+
+
+

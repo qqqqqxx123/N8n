@@ -1,5 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { z } from 'zod';
+import { normalizePhoneToE164 } from '@/lib/utils/phone';
+import { normalizeDOB } from '@/lib/utils/dob';
+
+const CreateContactSchema = z.object({
+  phone_e164: z.string(),
+  full_name: z.string().optional(),
+  source: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const validated = CreateContactSchema.parse(body);
+
+    const supabase = createClient();
+
+    // Normalize phone number
+    const normalizedPhone = normalizePhoneToE164(validated.phone_e164);
+    if (!normalizedPhone) {
+      return NextResponse.json(
+        { error: 'Invalid phone number format' },
+        { status: 400 }
+      );
+    }
+
+    // Check if contact already exists
+    const { data: existing } = await supabase
+      .from('contacts')
+      .select('id')
+      .eq('phone_e164', normalizedPhone)
+      .single();
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'Contact already exists', contact: existing },
+        { status: 409 }
+      );
+    }
+
+    // Create new contact
+    const { data: contact, error } = await supabase
+      .from('contacts')
+      .insert({
+        phone_e164: normalizedPhone,
+        full_name: validated.full_name || null,
+        source: validated.source || 'manual_add',
+        tags: validated.tags || [],
+        opt_in_status: true, // Assume opt-in when manually added
+        opt_in_timestamp: new Date().toISOString(),
+        opt_in_source: 'manual_add',
+      })
+      .select()
+      .single();
+
+    if (error || !contact) {
+      console.error('Contact creation error:', error);
+      return NextResponse.json(
+        { error: error?.message || 'Failed to create contact' },
+        { status: 500 }
+      );
+    }
+
+    // Link existing messages to this contact
+    await supabase
+      .from('messages')
+      .update({ contact_id: contact.id })
+      .eq('phone_e164', normalizedPhone)
+      .is('contact_id', null);
+
+    return NextResponse.json({ contact });
+  } catch (error) {
+    console.error('Create contact error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to create contact' },
+      { status: 500 }
+    );
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -65,6 +153,30 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Fetch scores for all contacts
+    const contactIds = (contacts || []).map(c => c.id);
+    let scoresMap = new Map<string, { score: number; segment: string }>();
+    
+    if (contactIds.length > 0) {
+      const { data: scores } = await supabase
+        .from('scores')
+        .select('contact_id, score, segment')
+        .in('contact_id', contactIds);
+
+      if (scores) {
+        scores.forEach(s => {
+          scoresMap.set(s.contact_id, { score: s.score, segment: s.segment });
+        });
+      }
+    }
+
+    // Attach scores to contacts
+    const contactsWithScores = (contacts || []).map(contact => ({
+      ...contact,
+      score: scoresMap.get(contact.id)?.score ?? null,
+      segment: scoresMap.get(contact.id)?.segment ?? null,
+    }));
+
     // Get unique sources
     const { data: allContacts } = await supabase
       .from('contacts')
@@ -76,7 +188,7 @@ export async function GET(request: NextRequest) {
     ) as string[];
 
     return NextResponse.json({
-      contacts: contacts || [],
+      contacts: contactsWithScores,
       sources,
     });
   } catch (error) {

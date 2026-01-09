@@ -79,6 +79,27 @@ export async function POST(request: NextRequest) {
           value: { url: validated.n8n_webhook_inbound_url },
           updated_at: new Date().toISOString(),
         });
+
+      // Notify wa-bridge to refresh webhook URL if it's running
+      try {
+        const waBridgeUrl = process.env.WA_BRIDGE_URL || 'http://localhost:3001';
+        const waBridgeApiKey = process.env.WA_BRIDGE_API_KEY || '';
+        
+        if (waBridgeUrl && waBridgeApiKey) {
+          await fetch(`${waBridgeUrl}/refresh-webhook`, {
+            method: 'POST',
+            headers: {
+              'X-API-Key': waBridgeApiKey,
+            },
+          }).catch((err) => {
+            // Non-fatal - wa-bridge might not be running
+            console.log('wa-bridge not available for webhook refresh:', err.message);
+          });
+        }
+      } catch (error) {
+        // Non-fatal error - continue even if wa-bridge refresh fails
+        console.log('Failed to notify wa-bridge of webhook change:', error);
+      }
     }
 
     // Update templates

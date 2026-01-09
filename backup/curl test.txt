@@ -1,0 +1,28 @@
+curl -X POST http://72.62.163.6:3001/send \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 62a2d5f4fb4e06c9ab887cc85e348380192e52eabbd61b3c7ffef7f9ceeb9880" \
+  -d '{
+    "to": "+85267775293",
+    "text": "test image",
+    "image": {
+      "url": "https://ndkksaxhnhfbacxwocsg.supabase.co/storage/v1/object/public/whatsapp-templates/whatsapp-templates/1767843598782-btgkj.png"
+    },
+    "caption": "hello"
+  }'
+
+
+
+{{ JSON.stringify({
+  to: $json.to,
+  text: $json.text,    
+  buttons: ($json.buttons || []).map(b => ({
+    type: b.type || "URL",
+    text: b.text || '',
+    url: (b.url || '').replace(/^<|>$/g, '').trim()
+  })).filter(b => b.text && b.url)
+    medias: ($json.medias || []).map(m => ({
+    type: "image",
+    url: (m.url || '').replace(/^<|>$/g, '').trim(),
+    caption: $json.text  // Caption attached to each image (works in album)
+  })).filter(m => m.url),
+  }) }}

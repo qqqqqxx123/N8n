@@ -6,10 +6,12 @@ import { subHours, subDays } from 'date-fns';
 import { applyCampaignFilters, CampaignFilters } from '@/lib/campaign-filters';
 
 const CampaignTriggerSchema = z.object({
-  segment: z.enum(['hot', 'warm', 'cold']),
-  template_name: z.string().min(1),
+  segment: z.enum(['hot', 'warm', 'cold']).optional(), // Optional when selected_contact_ids is provided
+  template_name: z.string().optional(),
   template_language: z.string().optional(), // e.g., 'en_US', 'zh_HK'
   template_variables: z.array(z.string()).optional(), // Array of variable values
+  manual_message: z.string().optional(), // Manual message text
+  selected_contact_ids: z.array(z.string()).optional(), // Selected contact IDs (takes precedence over filters)
   filters: z.object({
     minScore: z.number().optional(),
     purchaseMode: z.enum(['any', 'never', 'within', 'olderThan']).optional(),
@@ -23,17 +25,41 @@ const CampaignTriggerSchema = z.object({
     updatedMode: z.enum(['any', 'within', 'olderThan']).optional(),
     updatedDays: z.number().optional(),
   }).optional(),
-});
+}).refine(
+  (data) => data.template_name || data.manual_message,
+  {
+    message: "Either template_name or manual_message must be provided",
+    path: ["template_name"],
+  }
+).refine(
+  (data) => data.selected_contact_ids || data.segment,
+  {
+    message: "Either selected_contact_ids or segment must be provided",
+    path: ["segment"],
+  }
+);
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { segment, template_name, template_language, template_variables, filters = {} } = CampaignTriggerSchema.parse(body);
+    const { segment, template_name, template_language, template_variables, manual_message, selected_contact_ids, filters = {} } = CampaignTriggerSchema.parse(body);
 
     const supabase = createClient();
 
-    // Apply filters to get matching contact IDs
-    const filteredContactIds = await applyCampaignFilters(segment, filters);
+    let filteredContactIds: string[];
+
+    // If selected_contact_ids is provided, use those directly; otherwise apply filters
+    if (selected_contact_ids && selected_contact_ids.length > 0) {
+      filteredContactIds = selected_contact_ids;
+    } else if (segment) {
+      // Apply filters to get matching contact IDs
+      filteredContactIds = await applyCampaignFilters(segment, filters);
+    } else {
+      return NextResponse.json(
+        { error: 'Either selected_contact_ids or segment must be provided' },
+        { status: 400 }
+      );
+    }
 
     if (filteredContactIds.length === 0) {
       return NextResponse.json({
@@ -42,7 +68,7 @@ export async function POST(request: NextRequest) {
         matched_count: 0,
         sendable_count: 0,
         contact_ids: [],
-        message: 'No contacts match the filters',
+        message: selected_contact_ids ? 'No contacts selected' : 'No contacts match the filters',
       });
     }
 
@@ -71,21 +97,54 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // WhatsApp Account Protection: Apply comprehensive protection checks
+    const { canSendMessage, checkDailyQuota, checkHourlyQuota } = await import('@/lib/utils/whatsapp-protection');
+    
+    // Check global quotas first
+    const dailyQuota = await checkDailyQuota();
+    const hourlyQuota = await checkHourlyQuota();
+    
+    if (!dailyQuota.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Daily message quota exceeded',
+          sent: dailyQuota.sentToday,
+          limit: dailyQuota.sentToday + dailyQuota.remaining,
+          remaining: dailyQuota.remaining,
+          resetAt: dailyQuota.resetAt,
+        },
+        { status: 429 }
+      );
+    }
+
+    if (!hourlyQuota.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Hourly message quota exceeded',
+          sent: hourlyQuota.sentThisHour,
+          limit: hourlyQuota.sentThisHour + hourlyQuota.remaining,
+          remaining: hourlyQuota.remaining,
+          resetAt: hourlyQuota.resetAt,
+        },
+        { status: 429 }
+      );
+    }
+
     // Check 24-hour window for each contact and tag recent buyers
     const twentyFourHoursAgo = subHours(new Date(), 24);
     const sixtyDaysAgo = subDays(new Date(), 60);
     const eligibleContacts = [];
     const contactsToTag = [];
+    const isTemplate = !!template_name;
 
     for (const contact of contacts) {
-      // Check if contact has received an inbound message in last 24 hours
-      const { data: recentInbound } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('contact_id', contact.id)
-        .eq('direction', 'in')
-        .gte('created_at', twentyFourHoursAgo.toISOString())
-        .limit(1);
+      // Comprehensive protection check for each contact
+      const protectionCheck = await canSendMessage(contact.id, isTemplate);
+      
+      if (!protectionCheck.allowed) {
+        console.log(`Skipping contact ${contact.id} due to protection limits:`, protectionCheck.reasons);
+        continue; // Skip this contact
+      }
 
       // Check if contact is a recent buyer (within 60 days) - tag but don't exclude (already filtered)
       if (contact.last_purchase_at) {
@@ -98,8 +157,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // If no recent inbound, template is required (which we have)
-      // If recent inbound exists, we can send without template (but we'll still use template)
+      // Contact passed all protection checks
       eligibleContacts.push(contact);
     }
 
@@ -178,11 +236,12 @@ export async function POST(request: NextRequest) {
         webhookUrl,
         {
           campaign_type: 'whatsapp',
-          segment,
-          template_name,
+          segment: segment || undefined,
+          template_name: template_name || undefined,
           template_language: template_language || undefined,
           template_variables: template_variables || undefined,
           template_content: templateContent || undefined, // Include full template content/components
+          manual_message: manual_message || undefined, // Include manual message if provided
           contacts: eligibleContacts.map(c => ({
             id: c.id,
             phone_e164: c.phone_e164,
@@ -206,15 +265,22 @@ export async function POST(request: NextRequest) {
         type: 'whatsapp_outbound' as const,
         meta: {
           campaign_id: campaignId,
-          segment,
-          template_name,
+          segment: segment || 'selected',
+          template_name: template_name || undefined,
           template_language: template_language || undefined,
           template_variables: template_variables || undefined,
+          manual_message: manual_message || undefined,
           filters: filters || {},
+          selected_contact_ids: selected_contact_ids || undefined,
         },
       }));
 
-      await supabase.from('events').insert(events);
+      const { error: eventsError } = await supabase.from('events').insert(events);
+      
+      if (eventsError) {
+        console.error('Error inserting campaign events:', eventsError);
+        // Don't fail the request if events insert fails - campaign was still sent
+      }
 
       return NextResponse.json({
         success: true,
@@ -227,10 +293,21 @@ export async function POST(request: NextRequest) {
       });
     } catch (webhookError: any) {
       console.error('n8n webhook error:', webhookError);
+      
+      // Safely extract error details
+      let errorDetails: any = null;
+      if (webhookError.response?.data) {
+        errorDetails = webhookError.response.data;
+      } else if (webhookError.message) {
+        errorDetails = webhookError.message;
+      } else {
+        errorDetails = String(webhookError);
+      }
+      
       return NextResponse.json(
         {
           error: 'Failed to trigger campaign webhook',
-          details: webhookError.response?.data || webhookError.message,
+          details: errorDetails,
         },
         { status: 500 }
       );
@@ -243,8 +320,22 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    
+    // Provide more detailed error information
+    const errorMessage = error instanceof Error ? error.message : 'Failed to trigger campaign';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    console.error('Campaign trigger error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      error: String(error),
+    });
+    
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to trigger campaign' },
+      { 
+        error: errorMessage,
+        ...(process.env.NODE_ENV === 'development' && errorStack && { details: errorStack }),
+      },
       { status: 500 }
     );
   }

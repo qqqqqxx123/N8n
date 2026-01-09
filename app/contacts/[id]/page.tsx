@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { Navbar } from '@/components/navbar';
 import { Contact, Event, Message, Score } from '@/lib/types/database';
 import { format, isValid } from 'date-fns';
 
@@ -16,8 +17,19 @@ export default function ContactDetailPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRecomputing, setIsRecomputing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Edit form state
+  const [editForm, setEditForm] = useState({
+    full_name: '',
+    phone_e164: '',
+    tags: [] as string[],
+    total_spend: 0,
+    DOB: '',
+  });
 
   const fetchContactData = useCallback(async () => {
     setIsLoading(true);
@@ -37,6 +49,14 @@ export default function ContactDetailPage() {
 
       const contactData = await contactRes.json();
       setContact(contactData.contact);
+      // Initialize edit form with contact data
+      setEditForm({
+        full_name: contactData.contact.full_name || '',
+        phone_e164: contactData.contact.phone_e164 || '',
+        tags: contactData.contact.tags || [],
+        total_spend: Number(contactData.contact.total_spend) || 0,
+        DOB: contactData.contact.DOB || '',
+      });
 
       if (scoreRes.ok) {
         const scoreData = await scoreRes.json();
@@ -93,6 +113,71 @@ export default function ContactDetailPage() {
     }
   }
 
+  async function handleSave() {
+    setIsSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(`/api/contacts/${contactId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: editForm.full_name,
+          phone_e164: editForm.phone_e164,
+          tags: editForm.tags,
+          total_spend: editForm.total_spend,
+          DOB: editForm.DOB || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update contact');
+      }
+
+      const data = await response.json();
+      setContact(data.contact);
+      setIsEditing(false);
+      setSuccess('Contact updated successfully');
+      
+      // Refresh contact data
+      await fetchContactData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update contact');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleCancel() {
+    if (contact) {
+      setEditForm({
+        full_name: contact.full_name || '',
+        phone_e164: contact.phone_e164 || '',
+        tags: contact.tags || [],
+        total_spend: Number(contact.total_spend) || 0,
+        DOB: contact.DOB || '',
+      });
+    }
+    setIsEditing(false);
+  }
+
+  function handleTagChange(tagIndex: number, value: string) {
+    const newTags = [...editForm.tags];
+    newTags[tagIndex] = value;
+    setEditForm({ ...editForm, tags: newTags });
+  }
+
+  function handleAddTag() {
+    setEditForm({ ...editForm, tags: [...editForm.tags, ''] });
+  }
+
+  function handleRemoveTag(index: number) {
+    const newTags = editForm.tags.filter((_, i) => i !== index);
+    setEditForm({ ...editForm, tags: newTags });
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -117,31 +202,7 @@ export default function ContactDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20">
-            <div className="flex items-center space-x-8">
-              <Link href="/" className="text-2xl font-semibold text-gray-900">
-                Ring CRM
-              </Link>
-              <div className="flex space-x-6">
-                <Link href="/upload" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Upload
-                </Link>
-                <Link href="/contacts" className="text-blue-600 hover:text-blue-700 px-4 py-3 rounded-md text-base font-medium">
-                  Contacts
-                </Link>
-                <Link href="/campaigns" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Campaigns
-                </Link>
-                <Link href="/settings" className="text-gray-900 hover:text-blue-600 px-4 py-3 rounded-md text-base font-medium">
-                  Settings
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       <main className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-4">
@@ -165,15 +226,59 @@ export default function ContactDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Contact Information</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-gray-900">Contact Information</h2>
+                {!isEditing ? (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+                  >
+                    Edit
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCancel}
+                      className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    >
+                      {isSaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                )}
+              </div>
               <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Full Name</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{contact.full_name || 'N/A'}</dd>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editForm.full_name}
+                      onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                    />
+                  ) : (
+                    <dd className="mt-1 text-sm text-gray-900">{contact.full_name || 'N/A'}</dd>
+                  )}
                 </div>
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Phone</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{contact.phone_e164}</dd>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editForm.phone_e164}
+                      onChange={(e) => setEditForm({ ...editForm, phone_e164: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                    />
+                  ) : (
+                    <dd className="mt-1 text-sm text-gray-900">{contact.phone_e164}</dd>
+                  )}
                 </div>
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Source</dt>
@@ -183,19 +288,38 @@ export default function ContactDetailPage() {
                   <dt className="text-sm font-medium text-gray-500">Interest Type</dt>
                   <dd className="mt-1 text-sm text-gray-900">{contact.interest_type || 'N/A'}</dd>
                 </div>
-                {contact.DOB && (
-                  <div>
-                    <dt className="text-sm font-medium text-gray-500">Date of Birth</dt>
+                <div>
+                  <dt className="text-sm font-medium text-gray-500">Date of Birth</dt>
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={editForm.DOB ? (editForm.DOB.includes('T') ? editForm.DOB.split('T')[0] : editForm.DOB) : ''}
+                      onChange={(e) => setEditForm({ ...editForm, DOB: e.target.value || '' })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                    />
+                  ) : (
                     <dd className="mt-1 text-sm text-gray-900">
-                      {contact.DOB.includes('T') 
-                        ? format(new Date(contact.DOB), 'PPP')
-                        : contact.DOB}
+                      {contact.DOB 
+                        ? (contact.DOB.includes('T') 
+                          ? contact.DOB.split('T')[0]
+                          : contact.DOB)
+                        : 'N/A'}
                     </dd>
-                  </div>
-                )}
+                  )}
+                </div>
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Total Spend</dt>
-                  <dd className="mt-1 text-sm text-gray-900">${Number(contact.total_spend).toLocaleString()}</dd>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editForm.total_spend}
+                      onChange={(e) => setEditForm({ ...editForm, total_spend: parseFloat(e.target.value) || 0 })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                    />
+                  ) : (
+                    <dd className="mt-1 text-sm text-gray-900">${Number(contact.total_spend).toLocaleString()}</dd>
+                  )}
                 </div>
                 <div>
                   <dt className="text-sm font-medium text-gray-500">Last Purchase</dt>
@@ -232,21 +356,63 @@ export default function ContactDetailPage() {
                 )}
               </dl>
 
-              {contact.tags.length > 0 && (
-                <div className="mt-4">
-                  <dt className="text-sm font-medium text-gray-500 mb-2">Tags</dt>
-                  <div className="flex flex-wrap gap-2">
-                    {contact.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
-                      >
-                        {tag}
-                      </span>
+              <div className="mt-4">
+                <dt className="text-sm font-medium text-gray-500 mb-2">Tags</dt>
+                {isEditing ? (
+                  <div className="space-y-2">
+                    {editForm.tags.map((tag, index) => (
+                      <div key={index} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={tag}
+                          onChange={(e) => handleTagChange(index, e.target.value)}
+                          className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900 bg-white"
+                          placeholder="Tag name"
+                        />
+                        <button
+                          onClick={() => handleRemoveTag(index)}
+                          className="px-3 py-1 bg-red-100 text-red-800 rounded-md hover:bg-red-200 text-sm font-medium"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     ))}
+                    <button
+                      onClick={handleAddTag}
+                      className="px-3 py-1 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 text-sm font-medium"
+                    >
+                      + Add Tag
+                    </button>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {contact.tags && contact.tags.length > 0 ? (
+                      contact.tags.map((tag) => {
+                        const tagLower = tag.toLowerCase();
+                        let tagClasses = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ';
+                        
+                        if (tagLower === 'vip') {
+                          tagClasses += 'bg-yellow-100 text-yellow-800';
+                        } else if (tagLower === 'regular') {
+                          tagClasses += 'bg-blue-100 text-blue-800';
+                        } else if (tagLower === 'new') {
+                          tagClasses += 'bg-red-100 text-red-800';
+                        } else {
+                          tagClasses += 'bg-blue-100 text-blue-800';
+                        }
+                        
+                        return (
+                          <span key={tag} className={tagClasses}>
+                            {tag}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-sm text-gray-500">No tags</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="bg-white rounded-lg shadow p-6">

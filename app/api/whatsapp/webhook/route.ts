@@ -243,60 +243,72 @@ export async function POST(request: NextRequest) {
           .limit(1)
           .single();
 
-        if (connection) {
-          // Get inbound webhook URL from settings
+      if (connection) {
+        // Check AI status from settings first
+        const { data: aiSetting } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', 'ai_enabled')
+          .single();
+        
+        const aiEnabled = aiSetting?.value?.enabled || false;
+
+        // Determine which webhook URL to use based on AI status
+        let inboundWebhookUrl: string | null = null;
+        
+        if (aiEnabled) {
+          // Use AI webhook URL from environment variable
+          inboundWebhookUrl = process.env.INBOUND_WEBHOOK_URL_AI || null;
+          console.log('[INBOUND WEBHOOK] AI enabled, using AI webhook URL');
+        } else {
+          // Use regular webhook URL from settings or environment
           const { data: inboundWebhookSetting } = await supabase
             .from('settings')
             .select('value')
             .eq('key', 'n8n_webhook_inbound_url')
             .single();
-
-          const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
-
-          if (inboundWebhookUrl) {
-            // Check AI status from settings
-            const { data: aiSetting } = await supabase
-              .from('settings')
-              .select('value')
-              .eq('key', 'ai_enabled')
-              .single();
-            
-            const aiEnabled = aiSetting?.value?.enabled || false;
-
-            // Forward message to inbound webhook
-            const webhookPayload = {
-              from: normalizedPhone,
-              to: connection.phone_number,
-              body: message.body,
-              message: message.body, // Alternative field name
-              message_id: message.message_id,
-              timestamp: message.timestamp || new Date().toISOString(),
-              type: message.type || 'text',
-              contact_id: newContact.id,
-              direction: 'in',
-              ai_enabled: aiEnabled,
-            };
-
-            try {
-              const webhookResponse = await fetch(inboundWebhookUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(webhookPayload),
-              });
-
-              if (!webhookResponse.ok) {
-                console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
-              } else {
-                console.log('Message forwarded to inbound webhook successfully');
-              }
-            } catch (webhookError) {
-              console.error('Error forwarding message to inbound webhook:', webhookError);
-              // Don't fail the request if webhook forwarding fails
-            }
-          }
+          
+          inboundWebhookUrl = inboundWebhookSetting?.value?.url || process.env.INBOUND_WEBHOOK_URL || null;
+          console.log('[INBOUND WEBHOOK] AI disabled, using regular webhook URL');
         }
+
+        if (inboundWebhookUrl) {
+          // Forward message to inbound webhook
+          const webhookPayload = {
+            from: normalizedPhone,
+            to: connection.phone_number,
+            body: message.body,
+            message: message.body, // Alternative field name
+            message_id: message.message_id,
+            timestamp: message.timestamp || new Date().toISOString(),
+            type: message.type || 'text',
+            contact_id: newContact.id,
+            direction: 'in',
+            ai_enabled: aiEnabled,
+          };
+
+          try {
+            const webhookResponse = await fetch(inboundWebhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(webhookPayload),
+            });
+
+            if (!webhookResponse.ok) {
+              console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
+            } else {
+              console.log(`Message forwarded to ${aiEnabled ? 'AI' : 'regular'} inbound webhook successfully`);
+            }
+          } catch (webhookError) {
+            console.error('Error forwarding message to inbound webhook:', webhookError);
+            // Don't fail the request if webhook forwarding fails
+          }
+        } else {
+          console.warn('[INBOUND WEBHOOK] No webhook URL configured for', aiEnabled ? 'AI' : 'regular', 'mode');
+        }
+      }
       } catch (forwardError) {
         console.error('Error checking connection or forwarding message:', forwardError);
         // Don't fail the request if forwarding fails
@@ -391,25 +403,35 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (connection) {
-        // Get inbound webhook URL from settings
-        const { data: inboundWebhookSetting } = await supabase
+        // Check AI status from settings first
+        const { data: aiSetting } = await supabase
           .from('settings')
           .select('value')
-          .eq('key', 'n8n_webhook_inbound_url')
+          .eq('key', 'ai_enabled')
           .single();
+        
+        const aiEnabled = aiSetting?.value?.enabled || false;
 
-        const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
-
-        if (inboundWebhookUrl) {
-          // Check AI status from settings
-          const { data: aiSetting } = await supabase
+        // Determine which webhook URL to use based on AI status
+        let inboundWebhookUrl: string | null = null;
+        
+        if (aiEnabled) {
+          // Use AI webhook URL from environment variable
+          inboundWebhookUrl = process.env.INBOUND_WEBHOOK_URL_AI || null;
+          console.log('[INBOUND WEBHOOK] AI enabled, using AI webhook URL');
+        } else {
+          // Use regular webhook URL from settings or environment
+          const { data: inboundWebhookSetting } = await supabase
             .from('settings')
             .select('value')
-            .eq('key', 'ai_enabled')
+            .eq('key', 'n8n_webhook_inbound_url')
             .single();
           
-          const aiEnabled = aiSetting?.value?.enabled || false;
+          inboundWebhookUrl = inboundWebhookSetting?.value?.url || process.env.INBOUND_WEBHOOK_URL || null;
+          console.log('[INBOUND WEBHOOK] AI disabled, using regular webhook URL');
+        }
 
+        if (inboundWebhookUrl) {
           // Forward message to inbound webhook
           const webhookPayload = {
             from: normalizedPhone,
@@ -436,12 +458,14 @@ export async function POST(request: NextRequest) {
             if (!webhookResponse.ok) {
               console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
             } else {
-              console.log('Message forwarded to inbound webhook successfully');
+              console.log(`Message forwarded to ${aiEnabled ? 'AI' : 'regular'} inbound webhook successfully`);
             }
           } catch (webhookError) {
             console.error('Error forwarding message to inbound webhook:', webhookError);
             // Don't fail the request if webhook forwarding fails
           }
+        } else {
+          console.warn('[INBOUND WEBHOOK] No webhook URL configured for', aiEnabled ? 'AI' : 'regular', 'mode');
         }
       }
     } catch (forwardError) {

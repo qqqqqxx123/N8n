@@ -17,6 +17,10 @@ const InboundMessageSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // Log that we received a request
+    console.log('[INBOUND WEBHOOK] Request received at:', new Date().toISOString());
+    console.log('[INBOUND WEBHOOK] Request headers:', JSON.stringify(Object.fromEntries(request.headers.entries()), null, 2));
+    
     const body = await request.json();
     
     // Log incoming webhook for debugging
@@ -257,16 +261,10 @@ export async function POST(request: NextRequest) {
           let webhookUrl: string | null = null;
           
           if (aiEnabled) {
-            // If AI is enabled, use AI webhook if configured
-            const { data: aiWebhookSetting } = await supabase
-              .from('settings')
-              .select('value')
-              .eq('key', 'ai_webhook_url')
-              .single();
+            // If AI is enabled, use hardcoded AI webhook URL from environment variable
+            webhookUrl = process.env.AI_WEBHOOK_INBOUND_URL || null;
             
-            webhookUrl = aiWebhookSetting?.value?.url || null;
-            
-            // If AI webhook not set, fallback to regular inbound webhook
+            // If AI webhook not set in env, fallback to regular inbound webhook
             if (!webhookUrl) {
               const { data: inboundWebhookSetting } = await supabase
                 .from('settings')
@@ -427,16 +425,10 @@ export async function POST(request: NextRequest) {
         let webhookUrl: string | null = null;
         
         if (aiEnabled) {
-          // If AI is enabled, use AI webhook if configured
-          const { data: aiWebhookSetting } = await supabase
-            .from('settings')
-            .select('value')
-            .eq('key', 'ai_webhook_url')
-            .single();
+          // If AI is enabled, use hardcoded AI webhook URL from environment variable
+          webhookUrl = process.env.AI_WEBHOOK_INBOUND_URL || null;
           
-          webhookUrl = aiWebhookSetting?.value?.url || null;
-          
-          // If AI webhook not set, fallback to regular inbound webhook
+          // If AI webhook not set in env, fallback to regular inbound webhook
           if (!webhookUrl) {
             const { data: inboundWebhookSetting } = await supabase
               .from('settings')

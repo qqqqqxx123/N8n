@@ -110,4 +110,10 @@ docker run -d --name ring-crm \
   ring-crm
 
 
+docker run -d --name ring-crm-update \
+  --restart unless-stopped \
+  -p 3002:3002 \
+  --env-file .env \
+  ring-crm-update
+
 

@@ -11,7 +11,7 @@ interface Message {
   id: string;
   contact_id: string | null;
   phone_e164: string | null;
-  direction: 'in' | 'out' | 'out (AI reply)';
+  direction: 'in' | 'out';
   body: string | null;
   template_name: string | null;
   status: string;
@@ -1035,57 +1035,34 @@ export default function MessagesPage() {
 
                 {/* Messages */}
                 <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {messages.map((message) => {
-                    const isOutbound = message.direction === 'out' || message.direction === 'out (AI reply)';
-                    const isAiReply = message.direction === 'out (AI reply)';
-                    
-                    return (
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.direction === 'out' ? 'justify-end' : 'justify-start'}`}
+                    >
                       <div
-                        key={message.id}
-                        className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
+                        className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                          message.direction === 'out'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-900 border border-gray-200'
+                        }`}
                       >
-                        <div
-                          className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                            isAiReply
-                              ? 'bg-green-100 text-gray-900 border border-green-300'
-                              : message.direction === 'out'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-white text-gray-900 border border-gray-200'
+                        <p className="text-sm whitespace-pre-wrap">{message.body || '(No content)'}</p>
+                        <p
+                          className={`text-xs mt-1 ${
+                            message.direction === 'out' ? 'text-blue-100' : 'text-gray-500'
                           }`}
                         >
-                          <div className="flex items-start gap-2">
-                            {isAiReply && (
-                              <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
-                                <circle cx="9.5" cy="10" r="1.5" fill="white"/>
-                                <circle cx="14.5" cy="10" r="1.5" fill="white"/>
-                                <path d="M9 14h6" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-                                <path d="M12 2v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                                <path d="M12 20v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                              </svg>
-                            )}
-                            <p className="text-sm whitespace-pre-wrap flex-1">{message.body || '(No content)'}</p>
-                          </div>
-                          <p
-                            className={`text-xs mt-1 ${
-                              isAiReply 
-                                ? 'text-green-700' 
-                                : message.direction === 'out' 
-                                ? 'text-blue-100' 
-                                : 'text-gray-500'
-                            }`}
-                          >
-                            {formatTime(message.created_at)}
-                            {isOutbound && (
-                              <span className="ml-1">
-                                {message.status === 'delivered' ? '✓✓' : message.status === 'sent' ? '✓' : ''}
-                              </span>
-                            )}
-                          </p>
-                        </div>
+                          {formatTime(message.created_at)}
+                          {message.direction === 'out' && (
+                            <span className="ml-1">
+                              {message.status === 'delivered' ? '✓✓' : message.status === 'sent' ? '✓' : ''}
+                            </span>
+                          )}
+                        </p>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                   {/* Invisible element at the bottom to scroll to */}
                   <div ref={messagesEndRef} />
                 </div>

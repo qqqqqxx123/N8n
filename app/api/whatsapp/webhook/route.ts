@@ -17,10 +17,6 @@ const InboundMessageSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Log that we received a request
-    console.log('[INBOUND WEBHOOK] Request received at:', new Date().toISOString());
-    console.log('[INBOUND WEBHOOK] Request headers:', JSON.stringify(Object.fromEntries(request.headers.entries()), null, 2));
-    
     const body = await request.json();
     
     // Log incoming webhook for debugging
@@ -84,26 +80,16 @@ export async function POST(request: NextRequest) {
     console.log('[INBOUND WEBHOOK] Normalized phone:', normalizedPhone);
 
     // Check for duplicate message by provider_message_id (if available)
-    // Use a more robust check that includes phone number to handle edge cases
     if (message.message_id) {
-      const { data: existingMessage, error: checkError } = await supabase
+      const { data: existingMessage } = await supabase
         .from('messages')
-        .select('id, provider_message_id, created_at, phone_e164')
+        .select('id, provider_message_id, created_at')
         .eq('provider_message_id', message.message_id)
         .eq('direction', 'in')
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.error('[INBOUND WEBHOOK] Error checking for duplicate:', checkError);
-      }
+        .single();
 
       if (existingMessage) {
-        console.log('[INBOUND WEBHOOK] Duplicate message detected by provider_message_id:', {
-          messageId: message.message_id,
-          existingId: existingMessage.id,
-          existingPhone: existingMessage.phone_e164,
-          newPhone: normalizedPhone
-        });
+        console.log('[INBOUND WEBHOOK] Duplicate message detected by provider_message_id:', message.message_id);
         return NextResponse.json({
           success: true,
           message: 'Duplicate message ignored',
@@ -112,9 +98,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Note: We only check by provider_message_id (not by body content)
-    // This allows users to legitimately send the same message twice
-    // The database unique constraint will prevent true duplicates (same provider_message_id)
+    // Also check for duplicate by content within the last 2 minutes (additional safety check)
+    if (message.body) {
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const trimmedBody = message.body.trim();
+      
+      const { data: recentMessages } = await supabase
+        .from('messages')
+        .select('id, body, created_at, provider_message_id')
+        .eq('direction', 'in')
+        .eq('phone_e164', normalizedPhone)
+        .gte('created_at', twoMinutesAgo)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (recentMessages && recentMessages.length > 0) {
+        // Check for exact body match or very similar body
+        const duplicate = recentMessages.find((msg) => {
+          const msgBody = (msg.body || '').trim();
+          return msgBody === trimmedBody || 
+                 (msgBody.length > 0 && trimmedBody.length > 0 && 
+                  Math.abs(msgBody.length - trimmedBody.length) <= 2 &&
+                  (msgBody.includes(trimmedBody.substring(0, Math.min(20, trimmedBody.length))) ||
+                   trimmedBody.includes(msgBody.substring(0, Math.min(20, msgBody.length)))));
+        });
+
+        if (duplicate) {
+          console.log('[INBOUND WEBHOOK] Duplicate message detected by body content:', {
+            messageId: message.message_id,
+            duplicateId: duplicate.id,
+            body: trimmedBody.substring(0, 50),
+          });
+          return NextResponse.json({
+            success: true,
+            message: 'Duplicate message ignored',
+            duplicate: true,
+          });
+        }
+      }
+    }
 
     // Find contact by phone (IMPORTANT: select opt_in_status too for TS + logic)
     const { data: contact, error: contactError } = await supabase
@@ -142,32 +164,15 @@ export async function POST(request: NextRequest) {
       if (createError || !newContact) {
         console.error('Failed to create contact, storing message with phone_e164 only:', createError);
         
-        // Insert orphaned message - database unique constraint will prevent duplicates
-        const { data: orphanedMessage, error: orphanError } = await supabase
-          .from('messages')
-          .insert({
-            contact_id: null, // Will be linked later via trigger
-            phone_e164: normalizedPhone,
-            direction: 'in',
-            status: 'delivered',
-            provider_message_id: message.message_id ?? null,
-            body: message.body ?? null,
-            is_read: false,
-          })
-          .select()
-          .maybeSingle();
-        
-        // If duplicate key error, message already exists - that's okay
-        if (orphanError && (orphanError.code === '23505' || orphanError.message?.includes('duplicate'))) {
-          console.log('[INBOUND WEBHOOK] Duplicate orphaned message prevented:', message.message_id);
-          // Message already exists, return success
-          return NextResponse.json({
-            success: true,
-            contact_id: null,
-            message: 'Message already exists',
-            duplicate: true,
-          });
-        }
+        const { data: orphanedMessage, error: orphanError } = await supabase.from('messages').insert({
+          contact_id: null, // Will be linked later via trigger
+          phone_e164: normalizedPhone,
+          direction: 'in',
+          status: 'delivered',
+          provider_message_id: message.message_id ?? null,
+          body: message.body ?? null,
+          is_read: false,
+        }).select().single();
 
         if (orphanError) {
           console.error('Error inserting orphaned message:', orphanError);
@@ -182,43 +187,28 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Insert message - database unique constraint will prevent duplicates
-      const { data: insertedMessage, error: messageError } = await supabase
-        .from('messages')
-        .insert({
-          contact_id: newContact.id,
-          phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
+      const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
+        contact_id: newContact.id,
+        phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
+        direction: 'in',
+        status: 'delivered',
+        provider_message_id: message.message_id ?? null,
+        body: message.body ?? null,
+        is_read: false,
+      }).select().single();
+
+      if (messageError) {
+        console.error('Error inserting message for new contact:', messageError);
+        // Try to save as orphaned message if contact insert fails
+        const { error: orphanError } = await supabase.from('messages').insert({
+          contact_id: null,
+          phone_e164: normalizedPhone,
           direction: 'in',
           status: 'delivered',
           provider_message_id: message.message_id ?? null,
           body: message.body ?? null,
           is_read: false,
-        })
-        .select()
-        .maybeSingle();
-
-      // If duplicate key error (23505), message already exists - that's okay
-      if (messageError && (messageError.code === '23505' || messageError.message?.includes('duplicate'))) {
-        console.log('[INBOUND WEBHOOK] Duplicate prevented by database constraint:', message.message_id);
-        // Message already exists, continue with webhook forwarding
-      } else if (messageError) {
-        console.error('Error inserting message for new contact:', messageError);
-        // Try to save as orphaned message if contact insert fails
-        // Use upsert to prevent duplicates
-        const { error: orphanError } = await supabase
-          .from('messages')
-          .upsert({
-            contact_id: null,
-            phone_e164: normalizedPhone,
-            direction: 'in',
-            status: 'delivered',
-            provider_message_id: message.message_id ?? null,
-            body: message.body ?? null,
-            is_read: false,
-          }, {
-            onConflict: 'provider_message_id,direction,phone_e164',
-            ignoreDuplicates: false
-          });
+        });
         
         if (orphanError) {
           console.error('Error inserting orphaned message:', orphanError);
@@ -254,43 +244,26 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (connection) {
-          // Check AI status from settings
-          const { data: aiSetting } = await supabase
+          // Get inbound webhook URL from settings
+          const { data: inboundWebhookSetting } = await supabase
             .from('settings')
             .select('value')
-            .eq('key', 'ai_enabled')
+            .eq('key', 'n8n_webhook_inbound_url')
             .single();
-          
-          const aiEnabled = aiSetting?.value?.enabled || false;
 
-          // Determine which webhook to use
-          let webhookUrl: string | null = null;
-          
-          if (aiEnabled) {
-            // If AI is enabled, use hardcoded AI webhook URL from environment variable
-            webhookUrl = process.env.AI_WEBHOOK_INBOUND_URL || null;
-            
-            // If AI webhook not set in env, fallback to regular inbound webhook
-            if (!webhookUrl) {
-              const { data: inboundWebhookSetting } = await supabase
-                .from('settings')
-                .select('value')
-                .eq('key', 'n8n_webhook_inbound_url')
-                .single();
-              webhookUrl = inboundWebhookSetting?.value?.url || null;
-            }
-          } else {
-            // If AI is disabled, use regular inbound webhook
-            const { data: inboundWebhookSetting } = await supabase
+          const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
+
+          if (inboundWebhookUrl) {
+            // Check AI status from settings
+            const { data: aiSetting } = await supabase
               .from('settings')
               .select('value')
-              .eq('key', 'n8n_webhook_inbound_url')
+              .eq('key', 'ai_enabled')
               .single();
-            webhookUrl = inboundWebhookSetting?.value?.url || null;
-          }
+            
+            const aiEnabled = aiSetting?.value?.enabled || false;
 
-          if (webhookUrl) {
-            // Forward message to webhook
+            // Forward message to inbound webhook
             const webhookPayload = {
               from: normalizedPhone,
               to: connection.phone_number,
@@ -305,7 +278,7 @@ export async function POST(request: NextRequest) {
             };
 
             try {
-              const webhookResponse = await fetch(webhookUrl, {
+              const webhookResponse = await fetch(inboundWebhookUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -314,12 +287,12 @@ export async function POST(request: NextRequest) {
               });
 
               if (!webhookResponse.ok) {
-                console.error('Failed to forward message to webhook:', webhookResponse.statusText);
+                console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
               } else {
-                console.log(`Message forwarded to ${aiEnabled ? 'AI' : 'inbound'} webhook successfully`);
+                console.log('Message forwarded to inbound webhook successfully');
               }
             } catch (webhookError) {
-              console.error('Error forwarding message to webhook:', webhookError);
+              console.error('Error forwarding message to inbound webhook:', webhookError);
               // Don't fail the request if webhook forwarding fails
             }
           }
@@ -347,57 +320,28 @@ export async function POST(request: NextRequest) {
       .single();
 
     // Log message - CRITICAL: This must succeed or return an error
-    // Database unique constraint will prevent duplicates
-    const { data: insertedMessage, error: messageError } = await supabase
-      .from('messages')
-      .insert({
-        contact_id: contact.id,
-        phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
+    const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
+      contact_id: contact.id,
+      phone_e164: normalizedPhone, // Store phone for linking if contact_id fails
+      direction: 'in',
+      status: 'delivered',
+      provider_message_id: message.message_id ?? null,
+      body: message.body ?? null,
+      is_read: false,
+    }).select().single();
+
+    if (messageError) {
+      console.error('Error inserting message for existing contact:', messageError);
+      // Try to save as orphaned message if contact insert fails
+      const { error: orphanError } = await supabase.from('messages').insert({
+        contact_id: null,
+        phone_e164: normalizedPhone,
         direction: 'in',
         status: 'delivered',
         provider_message_id: message.message_id ?? null,
         body: message.body ?? null,
         is_read: false,
-      })
-      .select()
-      .maybeSingle();
-    
-    // If duplicate key error, it's okay - message already exists
-    if (messageError && messageError.code === '23505') {
-      console.log('[INBOUND WEBHOOK] Duplicate prevented by database constraint:', message.message_id);
-      // Try to get the existing message
-      const { data: existingMessage } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('provider_message_id', message.message_id)
-        .eq('direction', 'in')
-        .eq('phone_e164', normalizedPhone)
-        .maybeSingle();
-      
-      if (existingMessage) {
-        // Continue with webhook forwarding even if message already exists
-        // (in case webhook wasn't sent before)
-      }
-    }
-
-    if (messageError) {
-      console.error('Error inserting message for existing contact:', messageError);
-      // Try to save as orphaned message if contact insert fails
-        // Use upsert to prevent duplicates
-        const { error: orphanError } = await supabase
-          .from('messages')
-          .upsert({
-            contact_id: null,
-            phone_e164: normalizedPhone,
-            direction: 'in',
-            status: 'delivered',
-            provider_message_id: message.message_id ?? null,
-            body: message.body ?? null,
-            is_read: false,
-          }, {
-            onConflict: 'provider_message_id,direction,phone_e164',
-            ignoreDuplicates: false
-          });
+      });
       
       if (orphanError) {
         console.error('Error inserting orphaned message:', orphanError);
@@ -447,43 +391,26 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (connection) {
-        // Check AI status from settings
-        const { data: aiSetting } = await supabase
+        // Get inbound webhook URL from settings
+        const { data: inboundWebhookSetting } = await supabase
           .from('settings')
           .select('value')
-          .eq('key', 'ai_enabled')
+          .eq('key', 'n8n_webhook_inbound_url')
           .single();
-        
-        const aiEnabled = aiSetting?.value?.enabled || false;
 
-        // Determine which webhook to use
-        let webhookUrl: string | null = null;
-        
-        if (aiEnabled) {
-          // If AI is enabled, use hardcoded AI webhook URL from environment variable
-          webhookUrl = process.env.AI_WEBHOOK_INBOUND_URL || null;
-          
-          // If AI webhook not set in env, fallback to regular inbound webhook
-          if (!webhookUrl) {
-            const { data: inboundWebhookSetting } = await supabase
-              .from('settings')
-              .select('value')
-              .eq('key', 'n8n_webhook_inbound_url')
-              .single();
-            webhookUrl = inboundWebhookSetting?.value?.url || null;
-          }
-        } else {
-          // If AI is disabled, use regular inbound webhook
-          const { data: inboundWebhookSetting } = await supabase
+        const inboundWebhookUrl = inboundWebhookSetting?.value?.url;
+
+        if (inboundWebhookUrl) {
+          // Check AI status from settings
+          const { data: aiSetting } = await supabase
             .from('settings')
             .select('value')
-            .eq('key', 'n8n_webhook_inbound_url')
+            .eq('key', 'ai_enabled')
             .single();
-          webhookUrl = inboundWebhookSetting?.value?.url || null;
-        }
+          
+          const aiEnabled = aiSetting?.value?.enabled || false;
 
-        if (webhookUrl) {
-          // Forward message to webhook
+          // Forward message to inbound webhook
           const webhookPayload = {
             from: normalizedPhone,
             to: connection.phone_number,
@@ -498,7 +425,7 @@ export async function POST(request: NextRequest) {
           };
 
           try {
-            const webhookResponse = await fetch(webhookUrl, {
+            const webhookResponse = await fetch(inboundWebhookUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -507,12 +434,12 @@ export async function POST(request: NextRequest) {
             });
 
             if (!webhookResponse.ok) {
-              console.error('Failed to forward message to webhook:', webhookResponse.statusText);
+              console.error('Failed to forward message to inbound webhook:', webhookResponse.statusText);
             } else {
-              console.log(`Message forwarded to ${aiEnabled ? 'AI' : 'inbound'} webhook successfully`);
+              console.log('Message forwarded to inbound webhook successfully');
             }
           } catch (webhookError) {
-            console.error('Error forwarding message to webhook:', webhookError);
+            console.error('Error forwarding message to inbound webhook:', webhookError);
             // Don't fail the request if webhook forwarding fails
           }
         }

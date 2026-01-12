@@ -8,7 +8,6 @@ import { Navbar } from '@/components/navbar';
 interface Settings {
   n8n_webhook_url: string;
   n8n_webhook_inbound_url: string;
-  ai_webhook_url: string;
   n8n_webhook_secret: string;
   templates: Array<{ id: string; name: string; message?: string }>;
 }
@@ -18,7 +17,6 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({
     n8n_webhook_url: '',
     n8n_webhook_inbound_url: '',
-    ai_webhook_url: '',
     n8n_webhook_secret: '',
     templates: [],
   });
@@ -215,19 +213,6 @@ export default function SettingsPage() {
                     placeholder="https://your-n8n-instance.com/webhook/whatsapp-inbound"
                   />
                   <p className="mt-1 text-xs text-gray-500">Used for receiving inbound WhatsApp messages (configure this URL in your WhatsApp providers webhook settings)</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    AI Webhook URL (When AI is ON)
-                  </label>
-                  <input
-                    type="url"
-                    value={settings.ai_webhook_url}
-                    onChange={(e) => setSettings({ ...settings, ai_webhook_url: e.target.value })}
-                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base text-gray-900 bg-white"
-                    placeholder="https://your-ai-service.com/webhook/ai-inbound"
-                  />
-                  <p className="mt-1 text-xs text-gray-500">When AI switch is ON, inbound messages will be forwarded to this webhook instead of the regular inbound webhook</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">

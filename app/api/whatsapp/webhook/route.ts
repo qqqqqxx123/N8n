@@ -252,6 +252,7 @@ export async function POST(request: NextRequest) {
           .single();
         
         const aiEnabled = aiSetting?.value?.enabled || false;
+        console.log('[INBOUND WEBHOOK] AI status from database:', aiEnabled);
 
         // Determine which webhook URL to use based on AI status
         let inboundWebhookUrl: string | null = null;
@@ -259,7 +260,8 @@ export async function POST(request: NextRequest) {
         if (aiEnabled) {
           // Use AI webhook URL from environment variable
           inboundWebhookUrl = process.env.INBOUND_WEBHOOK_URL_AI || null;
-          console.log('[INBOUND WEBHOOK] AI enabled, using AI webhook URL');
+          console.log('[INBOUND WEBHOOK] AI enabled - checking env var INBOUND_WEBHOOK_URL_AI');
+          console.log('[INBOUND WEBHOOK] AI webhook URL:', inboundWebhookUrl || 'NOT FOUND - check environment variable');
         } else {
           // Use regular webhook URL from settings or environment
           const { data: inboundWebhookSetting } = await supabase
@@ -268,11 +270,17 @@ export async function POST(request: NextRequest) {
             .eq('key', 'n8n_webhook_inbound_url')
             .single();
           
-          inboundWebhookUrl = inboundWebhookSetting?.value?.url || process.env.INBOUND_WEBHOOK_URL || null;
-          console.log('[INBOUND WEBHOOK] AI disabled, using regular webhook URL');
+          const settingsUrl = inboundWebhookSetting?.value?.url || null;
+          const envUrl = process.env.INBOUND_WEBHOOK_URL || null;
+          inboundWebhookUrl = settingsUrl || envUrl || null;
+          console.log('[INBOUND WEBHOOK] AI disabled - using regular webhook');
+          console.log('[INBOUND WEBHOOK] Regular webhook from settings:', settingsUrl || 'not found');
+          console.log('[INBOUND WEBHOOK] Regular webhook from env:', envUrl || 'not found');
+          console.log('[INBOUND WEBHOOK] Final regular webhook URL:', inboundWebhookUrl);
         }
 
         if (inboundWebhookUrl) {
+          console.log('[INBOUND WEBHOOK] Forwarding to webhook:', inboundWebhookUrl);
           // Forward message to inbound webhook
           const webhookPayload = {
             from: normalizedPhone,
@@ -411,6 +419,7 @@ export async function POST(request: NextRequest) {
           .single();
         
         const aiEnabled = aiSetting?.value?.enabled || false;
+        console.log('[INBOUND WEBHOOK] AI status from database:', aiEnabled);
 
         // Determine which webhook URL to use based on AI status
         let inboundWebhookUrl: string | null = null;
@@ -418,7 +427,8 @@ export async function POST(request: NextRequest) {
         if (aiEnabled) {
           // Use AI webhook URL from environment variable
           inboundWebhookUrl = process.env.INBOUND_WEBHOOK_URL_AI || null;
-          console.log('[INBOUND WEBHOOK] AI enabled, using AI webhook URL');
+          console.log('[INBOUND WEBHOOK] AI enabled - checking env var INBOUND_WEBHOOK_URL_AI');
+          console.log('[INBOUND WEBHOOK] AI webhook URL:', inboundWebhookUrl || 'NOT FOUND - check environment variable');
         } else {
           // Use regular webhook URL from settings or environment
           const { data: inboundWebhookSetting } = await supabase
@@ -427,11 +437,17 @@ export async function POST(request: NextRequest) {
             .eq('key', 'n8n_webhook_inbound_url')
             .single();
           
-          inboundWebhookUrl = inboundWebhookSetting?.value?.url || process.env.INBOUND_WEBHOOK_URL || null;
-          console.log('[INBOUND WEBHOOK] AI disabled, using regular webhook URL');
+          const settingsUrl = inboundWebhookSetting?.value?.url || null;
+          const envUrl = process.env.INBOUND_WEBHOOK_URL || null;
+          inboundWebhookUrl = settingsUrl || envUrl || null;
+          console.log('[INBOUND WEBHOOK] AI disabled - using regular webhook');
+          console.log('[INBOUND WEBHOOK] Regular webhook from settings:', settingsUrl || 'not found');
+          console.log('[INBOUND WEBHOOK] Regular webhook from env:', envUrl || 'not found');
+          console.log('[INBOUND WEBHOOK] Final regular webhook URL:', inboundWebhookUrl);
         }
 
         if (inboundWebhookUrl) {
+          console.log('[INBOUND WEBHOOK] Forwarding to webhook:', inboundWebhookUrl);
           // Forward message to inbound webhook
           const webhookPayload = {
             from: normalizedPhone,

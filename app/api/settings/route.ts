@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 const SettingsSchema = z.object({
   n8n_webhook_url: z.string().url().or(z.literal('')).optional(),
   n8n_webhook_inbound_url: z.string().url().or(z.literal('')).optional(),
+  ai_webhook_url: z.string().url().or(z.literal('')).optional(),
   n8n_webhook_secret: z.string().optional(),
   templates: z.array(z.object({
     id: z.string(),
@@ -17,15 +18,17 @@ export async function GET() {
   try {
     const supabase = createClient();
 
-    const [webhookSettings, inboundWebhookSettings, templatesSettings] = await Promise.all([
+    const [webhookSettings, inboundWebhookSettings, aiWebhookSettings, templatesSettings] = await Promise.all([
       supabase.from('settings').select('value').eq('key', 'n8n_webhook_url').single(),
       supabase.from('settings').select('value').eq('key', 'n8n_webhook_inbound_url').single(),
+      supabase.from('settings').select('value').eq('key', 'ai_webhook_url').single(),
       supabase.from('settings').select('value').eq('key', 'whatsapp_templates').single(),
     ]);
 
     const settings = {
       n8n_webhook_url: webhookSettings.data?.value?.url || '',
       n8n_webhook_inbound_url: inboundWebhookSettings.data?.value?.url || '',
+      ai_webhook_url: aiWebhookSettings.data?.value?.url || '',
       n8n_webhook_secret: webhookSettings.data?.value?.secret || '',
       templates: templatesSettings.data?.value || [],
     };
@@ -100,6 +103,17 @@ export async function POST(request: NextRequest) {
         // Non-fatal error - continue even if wa-bridge refresh fails
         console.log('Failed to notify wa-bridge of webhook change:', error);
       }
+    }
+
+    // Update AI webhook settings
+    if (validated.ai_webhook_url !== undefined) {
+      await supabase
+        .from('settings')
+        .upsert({
+          key: 'ai_webhook_url',
+          value: { url: validated.ai_webhook_url },
+          updated_at: new Date().toISOString(),
+        });
     }
 
     // Update templates

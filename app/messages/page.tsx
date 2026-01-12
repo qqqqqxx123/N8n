@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Navbar } from '@/components/navbar';
 import { Contact } from '@/lib/types/database';
 import { supabase } from '@/lib/supabase/client';
@@ -10,7 +11,7 @@ interface Message {
   id: string;
   contact_id: string | null;
   phone_e164: string | null;
-  direction: 'in' | 'out';
+  direction: 'in' | 'out' | 'out (AI reply)';
   body: string | null;
   template_name: string | null;
   status: string;
@@ -48,6 +49,11 @@ export default function MessagesPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [isSavingContact, setIsSavingContact] = useState(false);
   const [isClearingMessages, setIsClearingMessages] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [isLoadingAiStatus, setIsLoadingAiStatus] = useState(true);
+  const [isTogglingAi, setIsTogglingAi] = useState(false);
+  const [whatsappStatus, setWhatsappStatus] = useState<string>('not_connected');
+  const [isCheckingWhatsapp, setIsCheckingWhatsapp] = useState(true);
   const [editForm, setEditForm] = useState({
     full_name: '',
     phone_e164: '',
@@ -71,6 +77,56 @@ export default function MessagesPage() {
   const formatPhoneForDisplay = useCallback((phone: string | null): string => {
     if (!phone) return '';
     return phone.startsWith('+') ? phone : `+${phone}`;
+  }, []);
+
+  const fetchAiStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/settings/ai');
+      if (response.ok) {
+        const data = await response.json();
+        setAiEnabled(data.ai_enabled || false);
+      }
+    } catch (err) {
+      console.error('Error fetching AI status:', err);
+    } finally {
+      setIsLoadingAiStatus(false);
+    }
+  }, []);
+
+  const toggleAi = useCallback(async () => {
+    setIsTogglingAi(true);
+    try {
+      const newStatus = !aiEnabled;
+      const response = await fetch('/api/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_enabled: newStatus }),
+      });
+
+      if (response.ok) {
+        setAiEnabled(newStatus);
+      } else {
+        console.error('Failed to update AI status');
+      }
+    } catch (err) {
+      console.error('Error toggling AI:', err);
+    } finally {
+      setIsTogglingAi(false);
+    }
+  }, [aiEnabled]);
+
+  const fetchWhatsappStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/whatsapp/connection');
+      if (response.ok) {
+        const data = await response.json();
+        setWhatsappStatus(data.status || 'not_connected');
+      }
+    } catch (err) {
+      console.error('Error fetching WhatsApp status:', err);
+    } finally {
+      setIsCheckingWhatsapp(false);
+    }
   }, []);
 
   const fetchConversations = useCallback(async () => {
@@ -225,7 +281,9 @@ export default function MessagesPage() {
 
   useEffect(() => {
     fetchConversations();
-  }, [fetchConversations]);
+    fetchAiStatus();
+    fetchWhatsappStatus();
+  }, [fetchConversations, fetchAiStatus, fetchWhatsappStatus]);
 
   useEffect(() => {
     if (selectedParticipant) {
@@ -619,11 +677,57 @@ export default function MessagesPage() {
       <Navbar />
 
       <main className="max-w-full mx-auto h-[calc(100vh-5rem)]">
+        {/* WhatsApp Connection Alert */}
+        {!isCheckingWhatsapp && whatsappStatus !== 'connected' && (
+          <div className="mx-4 mt-4 mb-4">
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-yellow-700">
+                      <strong>WhatsApp is not connected.</strong> Please connect your WhatsApp account to send and receive messages.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/connect-whatsapp"
+                  className="ml-4 flex-shrink-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-yellow-800 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                >
+                  Connect WhatsApp
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex h-full">
           {/* Conversations List */}
           <div className="w-1/3 border-r bg-white flex flex-col">
             <div className="p-4 border-b">
-              <h2 className="text-xl font-semibold text-gray-900 mb-3">Messages</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xl font-semibold text-gray-900">Messages</h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">AI</span>
+                  <button
+                    onClick={toggleAi}
+                    disabled={isLoadingAiStatus || isTogglingAi}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      aiEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                    } ${isLoadingAiStatus || isTogglingAi ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        aiEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
               <input
                 type="text"
                 value={searchQuery}
@@ -931,34 +1035,57 @@ export default function MessagesPage() {
 
                 {/* Messages */}
                 <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${message.direction === 'out' ? 'justify-end' : 'justify-start'}`}
-                    >
+                  {messages.map((message) => {
+                    const isOutbound = message.direction === 'out' || message.direction === 'out (AI reply)';
+                    const isAiReply = message.direction === 'out (AI reply)';
+                    
+                    return (
                       <div
-                        className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                          message.direction === 'out'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white text-gray-900 border border-gray-200'
-                        }`}
+                        key={message.id}
+                        className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                       >
-                        <p className="text-sm whitespace-pre-wrap">{message.body || '(No content)'}</p>
-                        <p
-                          className={`text-xs mt-1 ${
-                            message.direction === 'out' ? 'text-blue-100' : 'text-gray-500'
+                        <div
+                          className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                            isAiReply
+                              ? 'bg-green-100 text-gray-900 border border-green-300'
+                              : message.direction === 'out'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-white text-gray-900 border border-gray-200'
                           }`}
                         >
-                          {formatTime(message.created_at)}
-                          {message.direction === 'out' && (
-                            <span className="ml-1">
-                              {message.status === 'delivered' ? '✓✓' : message.status === 'sent' ? '✓' : ''}
-                            </span>
-                          )}
-                        </p>
+                          <div className="flex items-start gap-2">
+                            {isAiReply && (
+                              <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
+                                <circle cx="9.5" cy="10" r="1.5" fill="white"/>
+                                <circle cx="14.5" cy="10" r="1.5" fill="white"/>
+                                <path d="M9 14h6" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                                <path d="M12 2v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                                <path d="M12 20v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                              </svg>
+                            )}
+                            <p className="text-sm whitespace-pre-wrap flex-1">{message.body || '(No content)'}</p>
+                          </div>
+                          <p
+                            className={`text-xs mt-1 ${
+                              isAiReply 
+                                ? 'text-green-700' 
+                                : message.direction === 'out' 
+                                ? 'text-blue-100' 
+                                : 'text-gray-500'
+                            }`}
+                          >
+                            {formatTime(message.created_at)}
+                            {isOutbound && (
+                              <span className="ml-1">
+                                {message.status === 'delivered' ? '✓✓' : message.status === 'sent' ? '✓' : ''}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {/* Invisible element at the bottom to scroll to */}
                   <div ref={messagesEndRef} />
                 </div>

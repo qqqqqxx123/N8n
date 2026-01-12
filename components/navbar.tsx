@@ -57,7 +57,7 @@ export function Navbar() {
         <div className="flex justify-between h-20">
           <div className="flex items-center space-x-8">
             <Link href="/" className="text-2xl font-semibold text-gray-900">
-              Ring CRM
+              Montresor Infini CRM
             </Link>
             <div className="flex space-x-6">
               <Link

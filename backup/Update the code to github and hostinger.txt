@@ -69,7 +69,7 @@ Correct Build
 
 docker stop wa-bridge || true
 docker rm wa-bridge || true
-cdcd
+
 
 docker build --no-cache -t wa-bridge .
 
